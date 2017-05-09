@@ -17,17 +17,20 @@ Script File: ROLO_step6_train_30_exp3.py
 
 Description:
 
-	ROLO is short for Recurrent YOLO, aimed at simultaneous object detection and tracking
-	Paper: http://arxiv.org/abs/1607.05781
-	Author: Guanghan Ning
-	Webpage: http://guanghan.info/
+    ROLO is short for Recurrent YOLO, aimed at simultaneous object detection and tracking
+    Paper: http://arxiv.org/abs/1607.05781
+    Author: Guanghan Ning
+    Webpage: http://guanghan.info/
 '''
 
 # Imports
+import sys, os
+sys.path.insert(0, 'utils')
+os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 import ROLO_utils as utils
 
 import tensorflow as tf
-from tensorflow.models.rnn import rnn, rnn_cell
+from tensorflow.contrib import rnn
 import cv2
 
 import numpy as np
@@ -38,8 +41,8 @@ import random
 
 class ROLO_TF:
     disp_console = False
-    restore_weights = False#False
-
+    restore_weights = True#False
+    
     # YOLO parameters
     fromfile = None
     tofile_img = 'test/output.jpg'
@@ -58,7 +61,7 @@ class ROLO_TF:
     w_img, h_img = [352, 240]
 
     # ROLO Network Parameters
-    rolo_weights_file = '/u03/Guanghan/dev/ROLO-dev/output/ROLO_model/model_step6_exp3.ckpt' 
+    rolo_weights_file = 'model_step6_exp3.ckpt' 
     lstm_depth = 3
     num_steps = 6  # number of frames as an input sequence
     num_feat = 4096
@@ -93,8 +96,8 @@ class ROLO_TF:
 
 
     def createFolder(self, path):
-		if not os.path.exists(path):
-			os.makedirs(path)
+        if not os.path.exists(path):
+            os.makedirs(path)
 
 
     def LSTM_single(self, name,  _X, _istate, _weights, _biases):
@@ -104,14 +107,29 @@ class ROLO_TF:
         # Reshape to prepare input to hidden activation
         _X = tf.reshape(_X, [self.num_steps * self.batch_size, self.num_input]) # (num_steps*batch_size, num_input)
         # Split data because rnn cell needs a list of inputs for the RNN inner loop
-        _X = tf.split(0, self.num_steps, _X) # n_steps * (batch_size, num_input)
-        #print("_X: ", _X)
+        if(tf.__version__ < '1.0.1'):
+            _X = tf.split(0, self.num_steps, _X) # n_steps * (batch_size, num_input)
+        else:
+            _X = tf.split(_X, self.num_steps, 0) # n_steps * (batch_size, num_input)
 
-        cell = tf.nn.rnn_cell.LSTMCell(self.num_input, self.num_input)
-        state = _istate
-        for step in range(self.num_steps):
-            outputs, state = tf.nn.rnn(cell, [_X[step]], state)
-            tf.get_variable_scope().reuse_variables()
+        if(tf.__version__ < '1.0.1'):
+            cell = tf.nn.rnn_cell.LSTMCell(self.num_input, self.num_input)
+            state = initial_state = cell.zero_state(self.batch_size, dtype=tf.float32)
+            for step in range(self.num_steps):
+                outputs, state = tf.nn.rnn(cell, [_X[step]], state)
+                tf.get_variable_scope().reuse_variables()
+        else:
+            cell = rnn.BasicLSTMCell(self.num_input, self.num_input)
+            initial_state = cell.zero_state(self.batch_size, dtype=tf.float32)
+            states = [initial_state]
+            outputs = []
+            with tf.variable_scope(name):
+                for step in range(self.num_steps):
+                   if step > 0:
+                      tf.get_variable_scope().reuse_variables()
+                   output, new_state = cell(_X[step], states[-1])
+                   outputs.append(output)
+                   states.append(new_state)
         return outputs
 
 
@@ -133,7 +151,7 @@ class ROLO_TF:
         self.lstm_module = self.LSTM_single('lstm_test', self.x, self.istate, self.weights, self.biases)
         self.ious= tf.Variable(tf.zeros([self.batch_size]), name="ious")
         self.sess = tf.Session()
-        self.sess.run(tf.initialize_all_variables())
+        self.sess.run(tf.global_variables_initializer())
         self.saver = tf.train.Saver()
         #self.saver.restore(self.sess, self.rolo_weights_file)
         if self.disp_console : print "Loading complete!" + '\n'
@@ -157,7 +175,7 @@ class ROLO_TF:
         optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.accuracy) # Adam Optimizer
 
         # Initializing the variables
-        init = tf.initialize_all_variables()
+        init = tf.global_variables_initializer()
 
         # Launch the graph
         with tf.Session() as sess:

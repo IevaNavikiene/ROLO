@@ -1,1 +1,7 @@
 *~
+*.pyc
+benchmark/
+*.ckpt*
+output/
+checkpoint
+weights/

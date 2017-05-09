@@ -17,10 +17,10 @@ Script File: ROLO_utils.py
 
 Description:
       
-	ROLO is short for Recurrent YOLO, aimed at simultaneous object detection and tracking
-	Paper: http://arxiv.org/abs/1607.05781
-	Author: Guanghan Ning
-	Webpage: http://guanghan.info/
+    ROLO is short for Recurrent YOLO, aimed at simultaneous object detection and tracking
+    Paper: http://arxiv.org/abs/1607.05781
+    Author: Guanghan Ning
+    Webpage: http://guanghan.info/
 '''
 import os, sys, time
 import numpy as np
@@ -321,7 +321,7 @@ class ROLO_utils:
                 for path in paths_batch:
                         ct += 1
                         yolo_output = np.load(path)
-                        #print(yolo_output)
+                        print(yolo_output,'path',path)
                         yolo_output= np.reshape(yolo_output, 4102)
                         yolo_output_batch.append(yolo_output)
                 yolo_output_batch= np.reshape(yolo_output_batch, [batch_size*num_steps, 4102])
@@ -346,9 +346,9 @@ class ROLO_utils:
                         #print(yolo_output[0][0][0])
                         #print(len(yolo_output[0][0][0]))
                         yolo_output_new=  np.concatenate(
-				                  ( np.reshape(yolo_output[0][0][0], [-1, 4096]),
-								    np.reshape([0,0,0,0,0,0], [-1, 6]) ),
-								  axis = 1)
+                                  ( np.reshape(yolo_output[0][0][0], [-1, 4096]),
+                                    np.reshape([0,0,0,0,0,0], [-1, 6]) ),
+                                  axis = 1)
                         yolo_output_new= np.reshape(yolo_output_new, 4102)
                         yolo_output_batch.append(yolo_output_new)
                 yolo_output_batch= np.reshape(yolo_output_batch, [batch_size*num_steps, 4102])
@@ -371,9 +371,9 @@ class ROLO_utils:
                         #print(yolo_output[0][0][0])
                         #print(len(yolo_output[0][0][0]))
                         #yolo_output_new=  np.concatenate(
-				        #          ( np.reshape(yolo_output[0][0][0], [-1, 4096]),
-						#		    np.reshape([0,0,0,0,0,0], [-1, 6]) ),
-						#		  axis = 1)
+                        #          ( np.reshape(yolo_output[0][0][0], [-1, 4096]),
+                        #            np.reshape([0,0,0,0,0,0], [-1, 6]) ),
+                        #          axis = 1)
                         #yolo_output_new= np.reshape(yolo_output_new, 4102)
                         yolo_output_batch.append(yolo_output)
                 #yolo_output_batch= np.reshape(yolo_output_batch, [batch_size*num_steps, 4102])
@@ -544,7 +544,20 @@ def debug_gt_location( img, location):
     cv2.imshow('gt',img_cp)
     cv2.waitKey(1)
 
-
+def debug_2_locations( img, yolo_location, rolo_location):
+    img_cp = img.copy()
+    for i in range(2):  # b-g-r channels
+        if i ==0: location= yolo_location; color= (255, 0, 0)   # blur for yolo
+        elif i ==1: location= rolo_location; color= (0, 255, 0)   # green for rolo
+        x = int(location[0])
+        y = int(location[1])
+        w = int(location[2])
+        h = int(location[3])
+        if i == 0 or i== 1: cv2.rectangle(img_cp,(x-w//2, y-h//2),(x+w//2,y+h//2), color, 2)
+    cv2.imshow('2 locations',img_cp)
+    cv2.waitKey(100)
+    return img_cp
+    
 def debug_3_locations( img, gt_location, yolo_location, rolo_location):
     img_cp = img.copy()
     for i in range(3):  # b-g-r channels
@@ -1029,6 +1042,11 @@ def choose_video_sequence(test):
         sequence_name = 'Liquor'
         training_iters = 580
         testing_iters = 1741
+    else:
+		sequence_name = test
+		w_img, h_img = [640, 266]
+		testing_iters = 676
+		training_iters = 676
     return [w_img, h_img, sequence_name, training_iters, testing_iters]
 
 

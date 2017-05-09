@@ -226,3 +226,6 @@ The details are published as a technical report on arXiv. If you use the code an
 [[2]] Wu, Yi, Jongwoo Lim, and Ming-Hsuan Yang. "Object tracking benchmark." IEEE Transactions on Pattern Analysis and Machine Intelligence 37.9 (2015): 1834-1848.
 
 [2]: http://ieeexplore.ieee.org/xpl/login.jsp?tp=&arnumber=7001050&url=http%3A%2F%2Fieeexplore.ieee.org%2Fxpls%2Fabs_all.jsp%3Farnumber%3D7001050 "OTB100"
+
+
+python ROLO_demo_test_video.py to get ROLO working for a .mp4 file (not finished yet)

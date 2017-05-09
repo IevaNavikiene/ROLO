@@ -58,6 +58,7 @@ class ROLO_TF:
     num_box = 2
     grid_size = 7
     classes =  ["aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train","tvmonitor"]
+    test_folder= 'Couple2'#8
     w_img, h_img = [352, 240]
 
     # ROLO Network Parameters
@@ -91,7 +92,6 @@ class ROLO_TF:
     def __init__(self,argvs = []):
         print("ROLO init")
         self.ROLO(argvs)
-
 
     def LSTM_single(self, name,  _X, _istate, _weights, _biases):
 
@@ -148,7 +148,7 @@ class ROLO_TF:
         if self.disp_console : print "Loading complete!" + '\n'
 
 
-    def testing(self, x_path, y_path):
+    def testing(self, x_path):
         total_loss = 0
 
         print("TESTING ROLO...")
@@ -157,14 +157,6 @@ class ROLO_TF:
         print("pred: ", pred)
         self.pred_location = pred[0][:, 4097:4101]
         print("pred_location: ", self.pred_location)
-        print("self.y: ", self.y)
-
-        self.correct_prediction = tf.square(self.pred_location - self.y)
-        print("self.correct_prediction: ", self.correct_prediction)
-        self.accuracy = tf.reduce_mean(self.correct_prediction) * 100
-        print("self.accuracy: ", self.accuracy)
-        #optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.accuracy) # Adam Optimizer
-
         # Initializing the variables
         init = tf.initialize_all_variables()
 
@@ -183,23 +175,18 @@ class ROLO_TF:
             # Keep training until reach max iterations
             while id < self.testing_iters - self.num_steps:
                 # Load training data & ground truth
-                batch_xs = self.rolo_utils.load_yolo_output_test(x_path, self.batch_size, self.num_steps, id) # [num_of_examples, num_input] (depth == 1)
-
-                # Apply dropout to batch_xs
-                #for item in range(len(batch_xs)):
-                #    batch_xs[item] = self.dropout_features(batch_xs[item], 0.4)
-
-                batch_ys = self.rolo_utils.load_rolo_gt_test(y_path, self.batch_size, self.num_steps, id)
-                print("Batch_ys_initial: ", batch_ys)
-                batch_ys = utils.locations_from_0_to_1(self.w_img, self.h_img, batch_ys)
-
-
+                try:
+                    batch_xs = self.rolo_utils.load_yolo_output_test(x_path, self.batch_size, self.num_steps, id) # [num_of_examples, num_input] (depth == 1)
+                except ValueError:
+                    print("Oops! There is something wrong with your YOLO weights")
+                    id += 1
+                    continue
+                
                 # Reshape data to get 3 seq of 5002 elements
                 batch_xs = np.reshape(batch_xs, [self.batch_size, self.num_steps, self.num_input])
-                batch_ys = np.reshape(batch_ys, [self.batch_size, 4])
                 #print("Batch_ys: ", batch_ys)
 
-                pred_location= sess.run(self.pred_location,feed_dict={self.x: batch_xs, self.y: batch_ys, self.istate: np.zeros((self.batch_size, 2*self.num_input))})
+                pred_location= sess.run(self.pred_location,feed_dict={self.x: batch_xs, self.istate: np.zeros((self.batch_size, 2*self.num_input))})
                 #print("ROLO Pred: ", pred_location)
                 #print("len(pred) = ", len(pred_location))
                 #print("ROLO Pred in pixel: ", pred_location[0][0]*self.w_img, pred_location[0][1]*self.h_img, pred_location[0][2]*self.w_img, pred_location[0][3]*self.h_img)
@@ -209,12 +196,13 @@ class ROLO_TF:
                 utils.save_rolo_output_test(self.output_path, pred_location, id, self.num_steps, self.batch_size)
 
                 #sess.run(optimizer, feed_dict={self.x: batch_xs, self.y: batch_ys, self.istate: np.zeros((self.batch_size, 2*self.num_input))})
-
+                '''
                 if id % self.display_step == 0:
                     # Calculate batch loss
                     loss = sess.run(self.accuracy, feed_dict={self.x: batch_xs, self.y: batch_ys, self.istate: np.zeros((self.batch_size, 2*self.num_input))})
                     print "Iter " + str(id*self.batch_size) + ", Minibatch Loss= " + "{:.6f}".format(loss) #+ "{:.5f}".format(self.accuracy)
                     total_loss += loss
+                '''
                 id += 1
                 print(id)
 
@@ -227,7 +215,7 @@ class ROLO_TF:
         return None
 
     def ROLO(self, argvs):
-
+            self.test_folder = argvs['test_folder']
             self.rolo_utils= utils.ROLO_utils()
             self.rolo_utils.loadCfg()
             self.params = self.rolo_utils.params
@@ -246,20 +234,13 @@ class ROLO_TF:
                 print "Default: running ROLO test."
                 self.build_networks()
 
-                test= 'Couple2'#8
-                [self.w_img, self.h_img, sequence_name, dummy_1, self.testing_iters] = utils.choose_video_sequence(test)
+                [self.w_img, self.h_img, sequence_name, dummy_1, self.testing_iters] = utils.choose_video_sequence(self.test_folder)
 
                 x_path = os.path.join('benchmark/DATA', sequence_name, 'yolo_out/')
-                y_path = os.path.join('benchmark/DATA', sequence_name, 'groundtruth_rect.txt')
                 self.output_path = os.path.join('benchmark/DATA', sequence_name, 'rolo_out_test/')
                 utils.createFolder(self.output_path)
-
-                #self.rolo_weights_file = '/u03/Guanghan/dev/ROLO-dev/output/ROLO_model/model_dropout_20.ckpt'
-                # self.rolo_weights_file = '/u03/Guanghan/dev/ROLO-dev/output/ROLO_model/model_dropout_30.ckpt'
-                #self.rolo_weights_file = '/u03/Guanghan/dev/ROLO-dev/output/ROLO_model/model_dropout_30_2.ckpt'
                 self.rolo_weights_file= '/home/ieva/projects/ROLO/experiments/testing/model_step3_exp3.ckpt' 
-                #self.rolo_weights_file = '/u03/Guanghan/dev/ROLO-dev/output/ROLO_model/model_30_2_nd_newfit.ckpt'
-                self.testing(x_path, y_path)
+                self.testing(x_path)
 
     '''----------------------------------------main-----------------------------------------------------'''
 def main(argvs):

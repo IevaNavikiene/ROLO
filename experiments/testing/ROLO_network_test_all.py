@@ -17,17 +17,21 @@ Script File: ROLO_network_test_all.py
 
 Description:
 
-	ROLO is short for Recurrent YOLO, aimed at simultaneous object detection and tracking
-	Paper: http://arxiv.org/abs/1607.05781
-	Author: Guanghan Ning
-	Webpage: http://guanghan.info/
+   ROLO is short for Recurrent YOLO, aimed at simultaneous object detection and tracking
+   Paper: http://arxiv.org/abs/1607.05781
+   Author: Guanghan Ning
+   Webpage: http://guanghan.info/
 '''
 
 # Imports
+import sys
+sys.path.insert(0, 'utils')
 import ROLO_utils as utils
-
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 import tensorflow as tf
-from tensorflow.models.rnn import rnn, rnn_cell
+from tensorflow.contrib import rnn
+#from tensorflow.models.rnn import rnn, rnn_cell
 import cv2
 
 import numpy as np
@@ -92,19 +96,36 @@ class ROLO_TF:
 
 
     def LSTM_single(self, name,  _X, _istate, _weights, _biases):
-        with tf.device('/gpu:0'):
+        #with tf.device('/gpu:0'):
+        with tf.device('/cpu:0'):
             # input shape: (batch_size, n_steps, n_input)
             _X = tf.transpose(_X, [1, 0, 2])  # permute num_steps and batch_size
             # Reshape to prepare input to hidden activation
             _X = tf.reshape(_X, [self.num_steps * self.batch_size, self.num_input]) # (num_steps*batch_size, num_input)
             # Split data because rnn cell needs a list of inputs for the RNN inner loop
-            _X = tf.split(0, self.num_steps, _X) # n_steps * (batch_size, num_input)
-
-        cell = tf.nn.rnn_cell.LSTMCell(self.num_input, self.num_input)
-        state = _istate
-        for step in range(self.num_steps):
-            outputs, state = tf.nn.rnn(cell, [_X[step]], state)
-            tf.get_variable_scope().reuse_variables()
+            if(tf.__version__ >= '1.0.1'):
+                _X = tf.split(_X, self.num_steps, 0) # n_steps * (batch_size, num_input)
+            else:
+                _X = tf.split(0, self.num_steps, _X)
+        if(tf.__version__ >= '1.0.1'):
+            cell = rnn.BasicLSTMCell(self.num_input, self.num_input)#tf.nn.rnn_cell.LSTMCell(self.num_input, self.num_input)            
+            initial_state = cell.zero_state(self.batch_size, dtype=tf.float32)
+            #with tf.variable_scope(name):
+            states = [initial_state]
+            outputs = []
+            for step in range(self.num_steps):
+               if step > 0:
+                  tf.get_variable_scope().reuse_variables()
+               output, new_state = cell(_X[step], states[-1])
+               outputs.append(output)
+               states.append(new_state)
+        else:
+            cell = tf.nn.rnn_cell.LSTMCell(self.num_input, self.num_input)      
+            #state = [_istate]
+            state = cell.zero_state(self.batch_size, dtype=tf.float32)
+            for step in range(self.num_steps):
+                outputs, state =  tf.nn.rnn(cell, [_X[step]], state)
+                tf.get_variable_scope().reuse_variables()
         return outputs
 
 
@@ -123,7 +144,12 @@ class ROLO_TF:
         self.lstm_module = self.LSTM_single('lstm_test', self.x, self.istate, self.weights, self.biases)
         self.ious= tf.Variable(tf.zeros([self.batch_size]), name="ious")
         self.sess = tf.Session()
-        self.sess.run(tf.initialize_all_variables())
+        #self.sess.run(tf.initialize_all_variables())
+        if(tf.__version__ < '1.0.1'):
+            self.sess.run(tf.initialize_all_variables())
+        else:
+            self.sess.run(tf.global_variables_initializer())
+            
         self.saver = tf.train.Saver()
         #self.saver.restore(self.sess, self.rolo_weights_file)
         if self.disp_console : print "Loading complete!" + '\n'
@@ -133,23 +159,27 @@ class ROLO_TF:
         total_loss = 0
         # Use rolo_input for LSTM training
         pred = self.LSTM_single('lstm_train', self.x, self.istate, self.weights, self.biases)
-        #print("pred: ", pred)
+        print("pred: ", pred)
         self.pred_location = pred[0][:, 4097:4101]
-        #print("pred_location: ", self.pred_location)
-        #print("self.y: ", self.y)
+        print("pred_location: ", self.pred_location)
+        print("self.y: ", self.y)
         self.correct_prediction = tf.square(self.pred_location - self.y)
-        #print("self.correct_prediction: ", self.correct_prediction)
+        print("self.correct_prediction: ", self.correct_prediction)
         self.accuracy = tf.reduce_mean(self.correct_prediction) * 100
-        #print("self.accuracy: ", self.accuracy)
+        print("self.accuracy: ", self.accuracy)
         #optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.accuracy) # Adam Optimizer
 
         # Initializing the variables
-        init = tf.initialize_all_variables()
+        if(tf.__version__ < '1.0.1'):
+            init = tf.initialize_all_variables()
+        else:
+            init = tf.global_variables_initializer()
         # Launch the graph
         with tf.Session() as sess:
 
             if (self.restore_weights == True):
                 sess.run(init)
+                #print('graph', [n.name for n in tf.get_default_graph().as_graph_def().node])
                 self.saver.restore(sess, self.rolo_weights_file)
                 print "Loading complete!" + '\n'
             else:
@@ -160,6 +190,7 @@ class ROLO_TF:
             #id= 1
 
             # Keep training until reach max iterations
+            print(self.testing_iters, self.num_steps, 'steps counter')
             while id < self.testing_iters - self.num_steps:
                 # Load training data & ground truth
                 batch_xs = self.rolo_utils.load_yolo_output_test(x_path, self.batch_size, self.num_steps, id) # [num_of_examples, num_input] (depth == 1)
@@ -181,11 +212,12 @@ class ROLO_TF:
                 cycle_time = time.time() - start_time
                 total_time += cycle_time
 
-                #print("ROLO Pred: ", pred_location)
-                #print("len(pred) = ", len(pred_location))
-                #print("ROLO Pred in pixel: ", pred_location[0][0]*self.w_img, pred_location[0][1]*self.h_img, pred_location[0][2]*self.w_img, pred_location[0][3]*self.h_img)
-                #print("correct_prediction int: ", (pred_location + 0.1).astype(int))
-
+                '''
+                print("ROLO Pred: ", pred_location)
+                print("len(pred) = ", len(pred_location))
+                print("ROLO Pred in pixel: ", pred_location[0][0]*self.w_img, pred_location[0][1]*self.h_img, pred_location[0][2]*self.w_img, pred_location[0][3]*self.h_img)
+                print("correct_prediction int: ", (pred_location + 0.1).astype(int))
+                '''
                 # Save pred_location to file
                 utils.save_rolo_output_test(self.output_path, pred_location, id, self.num_steps, self.batch_size)
 
@@ -197,7 +229,7 @@ class ROLO_TF:
                     #print "Iter " + str(id*self.batch_size) + ", Minibatch Loss= " + "{:.6f}".format(loss) #+ "{:.5f}".format(self.accuracy)
                     total_loss += loss
                 id += 1
-                #print(id)
+                print(id)
 
             #print "Testing Finished!"
             avg_loss = total_loss/id
@@ -217,7 +249,7 @@ class ROLO_TF:
             self.params = self.rolo_utils.params
 
             arguments = self.rolo_utils.argv_parser(argvs)
-
+            #print(utils.file_in_path,'utils.file_in_path')
             if self.rolo_utils.flag_train is True:
                 self.training(utils.x_path, utils.y_path)
             elif self.rolo_utils.flag_track is True:
@@ -234,9 +266,7 @@ class ROLO_TF:
                 evaluate_ed = 29
 
                 for test in range(evaluate_st, evaluate_ed + 1):
-
                     [self.w_img, self.h_img, sequence_name, dummy_1, self.testing_iters] = utils.choose_video_sequence(test)
-
                     x_path = os.path.join('benchmark/DATA', sequence_name, 'yolo_out/')
                     y_path = os.path.join('benchmark/DATA', sequence_name, 'groundtruth_rect.txt')
                     self.output_path = os.path.join('benchmark/DATA', sequence_name, 'rolo_out_test/')
@@ -254,8 +284,8 @@ class ROLO_TF:
                     #self.rolo_weights_file= '/u03/Guanghan/dev/ROLO-dev/output/ROLO_model/model_step3_exp2.ckpt'
                     #self.rolo_weights_file= '/u03/Guanghan/dev/ROLO-dev/output/ROLO_model/model_step9_exp2.ckpt'
                     #self.rolo_weights_file= '/u03/Guanghan/dev/ROLO-dev/output/ROLO_model/model_step1_exp2.ckpt'
-
-                    self.rolo_weights_file= '/u03/Guanghan/dev/ROLO-dev/output/ROLO_model/model_step3_exp1_old.ckpt'
+                    #self.rolo_weights_file= '/home/ieva/projects/ROLO/experiments/testing/model_step3_exp3.ckpt'
+                    self.rolo_weights_file= '/home/ieva/projects/ROLO/experiments/testing/model_step3_exp3.ckpt' #model_step6_exp3.ckpt.data-00000-of-00001'
 
                     self.num_steps = 3  # number of frames as an input sequence
                     print("TESTING ROLO on video sequence: ", sequence_name)
